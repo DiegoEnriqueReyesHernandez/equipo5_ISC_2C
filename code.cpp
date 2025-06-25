@@ -1,104 +1,115 @@
+/*
+Diego Enrique Reyes Hernandez 
+Jose Angel Carmona Gonzales 
+Gustavo de Luna Dorantes 
+Mauricio Ramirez de la Rosa
+*/
 // INCLUSION DE LIBRERIAS
-#include <allegro5/allegro.h>                // Addon principal de Allegro
-#include <allegro5/allegro_primitives.h>     // Para dibujar formas (rectangulos, circulos, etc.)
-#include <allegro5/allegro_audio.h>          // Para manejar audio
-#include <allegro5/allegro_acodec.h>         // Para cargar formatos de audio como .wav, .ogg
-#include <allegro5/allegro_font.h>           // Para manejar fuentes de texto
-#include <allegro5/allegro_ttf.h>            // Para cargar archivos de fuente .ttf
-#include <allegro5/allegro_image.h>          // Para cargar formatos de imagen como .png, .jpg
-
-// Librerias estandar de C
-#include <time.h>       // Para inicializar la semilla del generador de numeros aleatorios
-#include <stdlib.h>     // Para usar rand()
-#include <stdbool.h>    // Para usar el tipo de dato 'bool' (true/false)
-#include <stdio.h>      // Para imprimir mensajes de error (ej. fprintf)
+#define _CRT_SECURE_NO_WARNINGS 
+#include <allegro5/allegro.h>
+#include <allegro5/allegro_primitives.h>
+#include <allegro5/allegro_audio.h>
+#include <allegro5/allegro_acodec.h>
+#include <allegro5/allegro_font.h>
+#include <allegro5/allegro_ttf.h>
+#include <allegro5/allegro_image.h>
+#include <string.h> // Para usar strcmp, strcpy y strlen
+#include <time.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdio.h>
 
 // DEFINICIONES GLOBALES Y CONSTANTES
-#define ANCHO 900                   // Ancho de la ventana del juego en pixeles
-#define ALTO 600                    // Alto de la ventana del juego en pixeles
-#define MAX_SEQUENCE 100            // El numero maximo de pasos en una secuencia
-#define NUM_BOTONES 9               // El numero de botones en la cuadricula (3x3)
+#define ANCHO 900
+#define ALTO 600
+#define MAX_SEQUENCE 100
+#define NUM_BOTONES 9
+#define NUM_SONIDOS_BASE 3
+#define MAX_JUGADORES 100
+#define MAX_NOMBRE 21
+#define ARCHIVO_GUARDADO "puntuaciones.dat"
 
-// Constantes para el diseno de la interfaz
-#define PANEL_MARGIN_X 50           // Margen horizontal desde el borde de la ventana a los paneles
-#define PANEL_MARGIN_Y 50           // Margen vertical desde el borde de la ventana a los paneles
-#define PANEL_WIDTH 380             // Ancho de cada uno de los dos paneles
-#define PANEL_HEIGHT 480            // Alto de cada uno de los dos paneles
-#define PANEL_SPACING 40            // Espacio horizontal entre los dos paneles
-#define BUTTON_SIZE 80              // Tamano de cada boton cuadrado de la cuadricula
-#define BUTTON_SPACING 25           // Espacio entre los botones dentro de la cuadricula
-#define BEVEL_THICKNESS 4           // Grosor en pixeles del borde biselado de los botones y paneles
+// Constantes de diseno
+#define PANEL_MARGIN_X 50
+#define PANEL_MARGIN_Y 50
+#define PANEL_WIDTH 380
+#define PANEL_HEIGHT 480
+#define PANEL_SPACING 40
+#define BUTTON_SIZE 80
+#define BUTTON_SPACING 25
+#define BEVEL_THICKNESS 4
 
-// Estructura para la informacion de cada boton
+// Estructura para la informacion de cada boton del juego
 typedef struct {
-    float dx, dy;           // Coordenadas en el panel de display (izquierdo)
-    float ix, iy;           // Coordenadas en el panel interactivo (derecho)
-    ALLEGRO_COLOR color;    // Color brillante para la secuencia
-    ALLEGRO_COLOR dim_color;// Color opaco para el estado normal
-    ALLEGRO_SAMPLE* sound;  // Sonido asociado
+    float dx, dy;
+    float ix, iy;
+    ALLEGRO_COLOR color;
+    ALLEGRO_COLOR dim_color;
+    ALLEGRO_SAMPLE_INSTANCE* sound_instance;
 } Boton;
 
-// Enum para controlar el estado general de la aplicacion (que pantalla se muestra)
-typedef enum {
-    STATE_MAIN_MENU,        // Estado para mostrar el menu principal
-    STATE_NEW_LOAD,         // Estado para el menu "Nueva Partida / Cargar"
-    STATE_LOAD_GAME,        // Estado para la pantalla de "Cargar Partida"
-    STATE_IN_GAME,          // Estado para cuando se esta jugando una partida
-    STATE_EXIT              // Estado para terminar y cerrar la aplicacion
-} GameState;
+// Estructura para guardar datos del jugador
+typedef struct {
+    char nombre[MAX_NOMBRE];
+    int max_score;
+    bool en_progreso;
+    int sequence_len_guardado;
+    int sequence_guardada[MAX_SEQUENCE];
+} Jugador;
 
-// Enum para las acciones que el usuario puede tomar en los menus
-typedef enum {
-    ACTION_QUIT,            // El usuario quiere salir de la aplicacion
-    ACTION_PLAY,            // El usuario presiono "PLAY"
-    ACTION_NEW_GAME,        // El usuario eligio "Nueva Partida"
-    ACTION_LOAD_GAME,       // El usuario eligio "Cargar Partida"
-    ACTION_BACK,            // El usuario quiere volver al menu anterior
-    ACTION_NONE             // No se tomo ninguna accion relevante
-} MenuAction;
+// Enums para estados y acciones
+typedef enum { STATE_MAIN_MENU, STATE_NEW_LOAD, STATE_GET_NAME, STATE_LOAD_GAME, STATE_IN_GAME, STATE_RANKINGS, STATE_EXIT } GameState;
+typedef enum { ACTION_QUIT, ACTION_PLAY, ACTION_NEW_GAME, ACTION_LOAD_GAME, ACTION_RANKINGS, ACTION_BACK, ACTION_NONE, ACTION_NAME_ENTERED } MenuAction;
+typedef enum { GAME_IDLE, GAME_SHOWING_SEQUENCE, GAME_PLAYER_TURN, GAME_OVER } GameplayState;
 
-// Enum para los estados internos especificos de una partida
-typedef enum {
-    GAME_IDLE,              // La partida esta esperando a que el jugador presione "Iniciar"
-    GAME_SHOWING_SEQUENCE,  // La computadora esta mostrando la secuencia de colores
-    GAME_PLAYER_TURN,       // El jugador debe replicar la secuencia
-    GAME_OVER               // El jugador ha fallado y la partida termino
-} GameplayState;
+// Variables Globales
+ALLEGRO_DISPLAY* display = NULL;
+ALLEGRO_EVENT_QUEUE* event_queue = NULL;
+Boton buttons[NUM_BOTONES];
+int sequence[MAX_SEQUENCE];
+int sequence_len = 0;
+char nombre_jugador_actual[MAX_NOMBRE];
 
-// Variables Globales (accesibles desde cualquier parte del codigo)
-ALLEGRO_DISPLAY* display = NULL;            // Puntero a la ventana principal del juego
-ALLEGRO_EVENT_QUEUE* event_queue = NULL;    // La cola donde se almacenan los eventos (clics, teclas, etc.)
-Boton buttons[NUM_BOTONES];                 // Un array para guardar la informacion de los 9 botones
-int sequence[MAX_SEQUENCE];                 // El array que almacena la secuencia de colores generada
-int sequence_len = 0;                       // El tamano actual de la secuencia
-
+// Música y sonidos
+ALLEGRO_SAMPLE* musica_menu = NULL;
+ALLEGRO_SAMPLE* musica_juego = NULL;
+ALLEGRO_SAMPLE* musica_derrota = NULL;
+ALLEGRO_SAMPLE_INSTANCE* instancia_menu = NULL;
+ALLEGRO_SAMPLE_INSTANCE* instancia_juego = NULL;
+ALLEGRO_SAMPLE_INSTANCE* instancia_derrota = NULL;
+ALLEGRO_SAMPLE* sonido_game_over = NULL;
+ALLEGRO_SAMPLE* laser = NULL;
 
 // Prototipos de Funciones
-
 void draw_beveled_panel(float x, float y, float w, float h, ALLEGRO_COLOR base_color);
 void draw_beveled_button(float x, float y, float size, ALLEGRO_COLOR base_color, bool pressed);
-void draw_game_ui(GameplayState current_game_state, ALLEGRO_FONT* font);
-void flash_sequence_color(int index, GameplayState state, ALLEGRO_FONT* font);
-void flash_player_press(int index, GameplayState state, ALLEGRO_FONT* font);
+void draw_game_ui(GameplayState current_game_state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image);
+void flash_sequence_color(int index, GameplayState state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image);
+void flash_player_press(int index, GameplayState state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image);
 int get_button_clicked(float mx, float my);
-void show_sequence(GameplayState state, ALLEGRO_FONT* font);
+void show_sequence(GameplayState state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image);
 void add_to_sequence();
-void init_buttons(ALLEGRO_SAMPLE* sounds[]);
-void game_over_screen(ALLEGRO_FONT* font);
-MenuAction run_game_loop(ALLEGRO_FONT* font);
+void init_buttons(ALLEGRO_SAMPLE_INSTANCE* instances[]);
+void game_over_screen(ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_explosion);
+MenuAction run_game_loop(ALLEGRO_FONT* font, bool cargado, ALLEGRO_BITMAP* bg_image, ALLEGRO_BITMAP* bg_explosion);
 MenuAction mostrar_menu_principal(ALLEGRO_BITMAP* bg_image, ALLEGRO_FONT* title_font, ALLEGRO_FONT* button_font);
-MenuAction show_new_load_menu(ALLEGRO_FONT* button_font);
+MenuAction show_new_load_menu(ALLEGRO_FONT* button_font, ALLEGRO_BITMAP* bg_image);
 MenuAction show_load_game_screen(ALLEGRO_FONT* font);
-
+MenuAction show_rankings_screen(ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image);
+MenuAction show_name_input_screen(ALLEGRO_FONT* font, char* name_buffer, int max_len);
+void sonido_laser();
+void reproducir_musica_menu();
+void reproducir_musica_derrota();
+void reproducir_musica_juego();
+void detener_musica();
+int leer_jugadores(Jugador jugadores[]);
+void guardar_partida(const char* nombre_jugador, int score, bool en_progreso);
+int comparar_puntuaciones(const void* a, const void* b);
 
 // Funcion Principal
 int main() {
-    // Inicializa la semilla del generador de numeros aleatorios para que cada partida sea diferente
     srand(time(NULL));
-
-    // Inicializa la libreria principal de Allegro
     al_init();
-    // Instala los addons necesarios para el mouse, teclado, formas, audio, etc.
     al_install_mouse();
     al_install_keyboard();
     al_init_primitives_addon();
@@ -108,416 +119,637 @@ int main() {
     al_init_ttf_addon();
     al_init_image_addon();
 
-    // Reserva 4 canales de audio para poder reproducir varios sonidos a la vez
-    al_reserve_samples(4);
+    al_reserve_samples(12);
 
-    // Crea la ventana del juego con el ancho y alto definidos
+    musica_menu = al_load_sample("musica_menu.ogg");
+    musica_juego = al_load_sample("musica_juego.ogg");
+    musica_derrota = al_load_sample("musica_derrota.ogg");
+    instancia_menu = al_create_sample_instance(musica_menu);
+    instancia_juego = al_create_sample_instance(musica_juego);
+    instancia_derrota = al_create_sample_instance(musica_derrota);
+    sonido_game_over = al_load_sample("game-over.wav");
+    laser = al_load_sample("laser.wav");
+
+    al_set_sample_instance_playmode(instancia_menu, ALLEGRO_PLAYMODE_LOOP);
+    al_set_sample_instance_playmode(instancia_derrota, ALLEGRO_PLAYMODE_LOOP);
+    al_set_sample_instance_playmode(instancia_juego, ALLEGRO_PLAYMODE_LOOP);
+    al_attach_sample_instance_to_mixer(instancia_menu, al_get_default_mixer());
+    al_attach_sample_instance_to_mixer(instancia_derrota, al_get_default_mixer());
+    al_attach_sample_instance_to_mixer(instancia_juego, al_get_default_mixer());
+
+    al_set_sample_instance_gain(instancia_menu, 1.0);
+    al_set_sample_instance_gain(instancia_juego, 0.1);
+    al_set_sample_instance_gain(instancia_derrota, 1.0);
+
+    ALLEGRO_SAMPLE* base_sounds[] = { al_load_sample("sonido_primero.wav"), al_load_sample("sonido_intermedio.wav"), al_load_sample("sonido_ultimo.wav") };
+    ALLEGRO_SAMPLE_INSTANCE* button_instances[NUM_BOTONES];
+    float base_speed = 0.8f;
+    float speed_increment = 0.05f;
+    for (int i = 0; i < NUM_BOTONES; i++) {
+        button_instances[i] = al_create_sample_instance(base_sounds[i % NUM_SONIDOS_BASE]);
+        if (button_instances[i]) {
+            al_set_sample_instance_speed(button_instances[i], base_speed + (i * speed_increment));
+            al_attach_sample_instance_to_mixer(button_instances[i], al_get_default_mixer());
+            al_set_sample_instance_gain(button_instances[i], 1.0);
+        }
+    }
+
     display = al_create_display(ANCHO, ALTO);
-    // Crea la cola para manejar los eventos del usuario
     event_queue = al_create_event_queue();
-
-    // Carga las fuentes desde los archivos .ttf
     ALLEGRO_FONT* title_font = al_load_font("Gameplay.ttf", 100, 0);
     ALLEGRO_FONT* button_font = al_load_font("Gameplay.ttf", 24, 0);
-    // Si la fuente personalizada no se pudo cargar, usa una fuente por defecto para evitar que el programa falle
+    ALLEGRO_FONT* input_font = al_load_font("Gameplay.ttf", 48, 0);
     if (!title_font) title_font = al_create_builtin_font();
-    if(!button_font) button_font = al_create_builtin_font();
-    
-    // Carga la imagen de fondo para el menu
+    if (!button_font) button_font = al_create_builtin_font();
+    if (!input_font) input_font = al_create_builtin_font();
+
     ALLEGRO_BITMAP* background_image = al_load_bitmap("background.png");
+    ALLEGRO_BITMAP* bg_2 = al_load_bitmap("bg2.png");
+    ALLEGRO_BITMAP* bg_reactor = al_load_bitmap("bg_reactor.png");
+    ALLEGRO_BITMAP* bg_explosion = al_load_bitmap("bg_explo.png");
 
-    // Carga los 4 archivos de sonido base
-    ALLEGRO_SAMPLE* sounds[] = {
-        al_load_sample("rojo.wav"), al_load_sample("verde.wav"),
-        al_load_sample("azul.wav"), al_load_sample("amarillo.wav")
-    };
-
-    // Registra las fuentes de eventos. El programa ahora escuchara eventos de la ventana, el mouse y el teclado.
     al_register_event_source(event_queue, al_get_display_event_source(display));
     al_register_event_source(event_queue, al_get_mouse_event_source());
     al_register_event_source(event_queue, al_get_keyboard_event_source());
+    init_buttons(button_instances);
 
-    // Llama a la funcion que inicializa las propiedades de los botones
-    init_buttons(sounds);
-
-    // La maquina de estados comienza en el menu principal
     GameState current_state = STATE_MAIN_MENU;
     MenuAction action;
+    bool juego_cargado = false;
 
-    // Bucle principal de la aplicacion. Se ejecuta mientras el estado no sea SALIR.
     while (current_state != STATE_EXIT) {
-        // El 'switch' decide que pantalla o logica ejecutar segun el estado actual
         switch (current_state) {
         case STATE_MAIN_MENU:
+            reproducir_musica_menu();
             action = mostrar_menu_principal(background_image, title_font, button_font);
             if (action == ACTION_PLAY) current_state = STATE_NEW_LOAD;
+            else if (action == ACTION_RANKINGS) current_state = STATE_RANKINGS;
             else current_state = STATE_EXIT;
             break;
         case STATE_NEW_LOAD:
-            action = show_new_load_menu(button_font);
-            if (action == ACTION_NEW_GAME) current_state = STATE_IN_GAME;
+            sonido_laser();
+            action = show_new_load_menu(button_font,bg_2);
+            if (action == ACTION_NEW_GAME) current_state = STATE_GET_NAME;
             else if (action == ACTION_LOAD_GAME) current_state = STATE_LOAD_GAME;
+            else if (action == ACTION_BACK) current_state = STATE_MAIN_MENU;
             else current_state = STATE_EXIT;
             break;
+        case STATE_GET_NAME:
+            sonido_laser();
+            action = show_name_input_screen(input_font, nombre_jugador_actual, MAX_NOMBRE);
+            if (action == ACTION_NAME_ENTERED) {
+                detener_musica();
+                juego_cargado = false;
+                current_state = STATE_IN_GAME;
+            }
+            else {
+                current_state = STATE_NEW_LOAD;
+            }
+            break;
         case STATE_LOAD_GAME:
+            sonido_laser();
             action = show_load_game_screen(button_font);
             if (action == ACTION_BACK) current_state = STATE_NEW_LOAD;
+            else if (action == ACTION_PLAY) {
+                detener_musica();
+                juego_cargado = true;
+                current_state = STATE_IN_GAME;
+            }
+            break;
+        case STATE_RANKINGS:
+            sonido_laser();
+            action = show_rankings_screen(button_font,bg_2);
+            current_state = STATE_MAIN_MENU;
             break;
         case STATE_IN_GAME:
-            action = run_game_loop(button_font);
+            reproducir_musica_juego();
+            action = run_game_loop(button_font, juego_cargado,bg_reactor,bg_explosion);
+            detener_musica();
             if (action == ACTION_QUIT) current_state = STATE_EXIT;
             else current_state = STATE_MAIN_MENU;
             break;
         case STATE_EXIT:
-            // No hace nada, esto causara que el bucle 'while' termine.
             break;
         }
     }
 
     // LIMPIEZA DE RECURSOS
-    // Es muy importante destruir todos los recursos creados para liberar la memoria.
-    for (int i = 0; i < 4; i++) {
-        if (sounds[i]) al_destroy_sample(sounds[i]);
-    }
     al_destroy_font(title_font);
     al_destroy_font(button_font);
-    if (background_image) {
-        al_destroy_bitmap(background_image);
-    }
+    al_destroy_font(input_font);
+    if (background_image) al_destroy_bitmap(background_image);
+    if (bg_2) al_destroy_bitmap(bg_2);
+    if (bg_reactor) al_destroy_bitmap(bg_reactor);
+    if (bg_explosion) al_destroy_bitmap(bg_explosion);
+    for (int i = 0; i < NUM_SONIDOS_BASE; i++) if (base_sounds[i]) al_destroy_sample(base_sounds[i]);
+    for (int i = 0; i < NUM_BOTONES; i++) if (button_instances[i]) al_destroy_sample_instance(button_instances[i]);
+    if (instancia_menu) al_destroy_sample_instance(instancia_menu);
+    if (instancia_juego) al_destroy_sample_instance(instancia_juego);
+    if (instancia_derrota) al_destroy_sample_instance(instancia_derrota);
+    if (musica_menu) al_destroy_sample(musica_menu);
+    if (musica_juego) al_destroy_sample(musica_juego);
+    if (musica_derrota) al_destroy_sample(musica_derrota);
+    if (sonido_game_over) al_destroy_sample(sonido_game_over);
+    if (laser) al_destroy_sample(laser);
     al_destroy_event_queue(event_queue);
     al_destroy_display(display);
-
-    return 0; // Termina el programa exitosamente
+    return 0;
 }
 
-
 // Implementacion de Funciones
-
 void draw_beveled_panel(float x, float y, float w, float h, ALLEGRO_COLOR base_color) {
-    // Define los colores para los bordes que simularan luz y sombra
     ALLEGRO_COLOR light_edge = al_map_rgb(180, 180, 180);
     ALLEGRO_COLOR dark_edge = al_map_rgb(80, 80, 80);
-    
-    // Dibuja el rectangulo de fondo del panel
     al_draw_filled_rectangle(x, y, x + w, y + h, base_color);
-    // Dibuja los 4 bordes para crear el efecto 3D
     al_draw_filled_rectangle(x, y, x + w, y + BEVEL_THICKNESS, light_edge);
     al_draw_filled_rectangle(x, y, x + BEVEL_THICKNESS, y + h, light_edge);
     al_draw_filled_rectangle(x, y + h - BEVEL_THICKNESS, x + w, y + h, dark_edge);
     al_draw_filled_rectangle(x + w - BEVEL_THICKNESS, y, x + w, y + h, dark_edge);
 }
-// Fin de la funcion draw_beveled_panel. Su proposito es dibujar un rectangulo con efecto 3D.
 
 void draw_beveled_button(float x, float y, float size, ALLEGRO_COLOR base_color, bool pressed) {
-    // Descompone el color base en sus componentes Rojo, Verde y Azul
     unsigned char r, g, b;
     al_unmap_rgb(base_color, &r, &g, &b);
-
-    // Genera versiones mas claras y oscuras del color base para el bisel
-    ALLEGRO_COLOR light = al_map_rgb( (r+50 > 255) ? 255 : r+50, (g+50 > 255) ? 255 : g+50, (b+50 > 255) ? 255 : b+50);
-    ALLEGRO_COLOR dark = al_map_rgb( (r-50 < 0) ? 0 : r-50, (g-50 < 0) ? 0 : g-50, (b-50 < 0) ? 0 : b-50);
-    
-    // Si el boton esta presionado, se invierten las luces y sombras para dar efecto de profundidad
+    ALLEGRO_COLOR light = al_map_rgb((r + 50 > 255) ? 255 : r + 50, (g + 50 > 255) ? 255 : g + 50, (b + 50 > 255) ? 255 : b + 50);
+    ALLEGRO_COLOR dark = al_map_rgb((r - 50 < 0) ? 0 : r - 50, (g - 50 < 0) ? 0 : g - 50, (b - 50 < 0) ? 0 : b - 50);
     ALLEGRO_COLOR top_left_edge = pressed ? dark : light;
     ALLEGRO_COLOR bottom_right_edge = pressed ? light : dark;
-
-    // Dibuja el cuerpo principal del boton
     al_draw_filled_rectangle(x, y, x + size, y + size, base_color);
-    // Dibuja los 4 bordes del bisel
     al_draw_filled_rectangle(x, y, x + size, y + BEVEL_THICKNESS, top_left_edge);
     al_draw_filled_rectangle(x, y, x + BEVEL_THICKNESS, y + size, top_left_edge);
     al_draw_filled_rectangle(x, y + size - BEVEL_THICKNESS, x + size, y + size, bottom_right_edge);
     al_draw_filled_rectangle(x + size - BEVEL_THICKNESS, y, x + size, y + size, bottom_right_edge);
 }
-// Fin de la funcion draw_beveled_button. Su proposito es dibujar un boton cuadrado con efecto 3D.
 
-void draw_game_ui(GameplayState current_game_state, ALLEGRO_FONT* font) {
-    // Limpia la pantalla con un color de fondo oscuro
-    al_clear_to_color(al_map_rgb(20, 20, 20));
-
-    // Dibuja los dos paneles principales de la interfaz
+void draw_game_ui(GameplayState current_game_state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image) {
+    if (bg_image) {
+        al_draw_scaled_bitmap(bg_image, 0, 0, al_get_bitmap_width(bg_image), al_get_bitmap_height(bg_image), 0, 0, ANCHO, ALTO, 0);
+    }
+    else {
+        al_clear_to_color(al_map_rgb(10, 10, 30)); // Color de respaldo
+    }
     draw_beveled_panel(PANEL_MARGIN_X, PANEL_MARGIN_Y, PANEL_WIDTH, PANEL_HEIGHT, al_map_rgb(0, 0, 0));
     draw_beveled_panel(PANEL_MARGIN_X + PANEL_WIDTH + PANEL_SPACING, PANEL_MARGIN_Y, PANEL_WIDTH, PANEL_HEIGHT, al_map_rgb(200, 200, 200));
-
-    // Itera sobre los 9 botones para dibujarlos
     for (int i = 0; i < NUM_BOTONES; i++) {
-        // Dibuja la cuadricula de la izquierda con luces de colores "apagadas"
         draw_beveled_button(buttons[i].dx, buttons[i].dy, BUTTON_SIZE, buttons[i].dim_color, false);
-        // Dibuja la cuadricula de la derecha con botones interactivos blancos
         draw_beveled_button(buttons[i].ix, buttons[i].iy, BUTTON_SIZE, al_map_rgb(220, 220, 220), false);
     }
-    
-    // Dibuja el boton rojo para Salir ('X') en la esquina superior derecha
     al_draw_filled_rectangle(ANCHO - 40, 10, ANCHO - 10, 40, al_map_rgb(200, 0, 0));
     al_draw_text(font, al_map_rgb(255, 255, 255), ANCHO - 25, 12, ALLEGRO_ALIGN_CENTER, "X");
-
-    // Dibuja el boton verde de "Iniciar" solo si el juego esta en el estado de espera
     if (current_game_state == GAME_IDLE) {
-        al_draw_filled_rectangle(ANCHO/2 - 100, ALTO/2 - 40, ANCHO/2 + 100, ALTO/2 + 40, al_map_rgb(0, 180, 0));
-        al_draw_text(font, al_map_rgb(255, 255, 255), ANCHO/2, ALTO/2 - 15, ALLEGRO_ALIGN_CENTER, "Iniciar");
+        al_draw_filled_rectangle(ANCHO / 2 - 100, ALTO / 2 - 40, ANCHO / 2 + 100, ALTO / 2 + 40, al_map_rgb(0, 180, 0));
+        al_draw_text(font, al_map_rgb(255, 255, 255), ANCHO / 2, ALTO / 2 - 15, ALLEGRO_ALIGN_CENTER, "Iniciar");
     }
-    
-    // Calcula y dibuja el Score en todo momento en la parte superior central
     int score = (sequence_len > 0) ? sequence_len - 1 : 0;
     al_draw_textf(font, al_map_rgb(255, 255, 255), ANCHO / 2, 10, ALLEGRO_ALIGN_CENTER, "Score: %d", score);
 }
-// Fin de la funcion draw_game_ui. Su proposito es dibujar todos los elementos graficos de la pantalla de juego.
 
-void flash_sequence_color(int index, GameplayState state, ALLEGRO_FONT* font) {
-    // Dibuja la interfaz base en su estado normal
-    draw_game_ui(state, font);
-
-    // Vuelve a dibujar solo la luz correspondiente pero con su color "vivo" (brillante)
+void flash_sequence_color(int index, GameplayState state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image) {
+    draw_game_ui(state, font, bg_image);
     draw_beveled_button(buttons[index].dx, buttons[index].dy, BUTTON_SIZE, buttons[index].color, false);
-    // Reproduce el sonido asociado
-    al_play_sample(buttons[index].sound, 1.0, 0.0, 1.0, ALLEGRO_PLAYMODE_ONCE, NULL);
-    // Muestra los cambios en pantalla
+    if (buttons[index].sound_instance) {
+        al_play_sample_instance(buttons[index].sound_instance);
+    }
     al_flip_display();
-    // Pausa el programa por medio segundo para que el destello sea visible
     al_rest(0.5);
-
-    // Vuelve a dibujar la interfaz en su estado normal para "apagar" el destello
-    draw_game_ui(state, font);
+    draw_game_ui(state, font, bg_image);
     al_flip_display();
-    // Pequeña pausa antes del siguiente destello
     al_rest(0.2);
 }
-// Fin de la funcion flash_sequence_color. Su proposito es mostrar un color de la secuencia en el panel izquierdo.
 
-void flash_player_press(int index, GameplayState state, ALLEGRO_FONT* font) {
-    // Dibuja la interfaz base en su estado normal
-    draw_game_ui(state, font);
-
-    // Vuelve a dibujar solo el boton presionado, pero con su bisel invertido para dar feedback
+void flash_player_press(int index, GameplayState state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image) {
+    draw_game_ui(state, font, bg_image);
     draw_beveled_button(buttons[index].ix, buttons[index].iy, BUTTON_SIZE, al_map_rgb(220, 220, 220), true);
-    // Reproduce el sonido asociado
-    al_play_sample(buttons[index].sound, 1.0, 0.0, 1.0, ALLEGRO_PLAYMODE_ONCE, NULL);
-    // Muestra los cambios en pantalla
+    if (buttons[index].sound_instance) {
+        al_play_sample_instance(buttons[index].sound_instance);
+    }
     al_flip_display();
-    // Pausa muy breve para que el feedback sea rapido
     al_rest(0.15);
 }
-// Fin de la funcion flash_player_press. Su proposito es animar el boton derecho para dar feedback al jugador.
 
 int get_button_clicked(float mx, float my) {
-    // Itera sobre los 9 botones
     for (int i = 0; i < NUM_BOTONES; i++) {
-        // Comprueba si las coordenadas del mouse (mx, my) estan dentro de los limites del boton interactivo actual
         if (mx >= buttons[i].ix && mx <= buttons[i].ix + BUTTON_SIZE &&
             my >= buttons[i].iy && my <= buttons[i].iy + BUTTON_SIZE) {
-            return i; // Si estan dentro, devuelve el indice de ese boton
+            return i;
         }
     }
-    return -1; // Si el clic fue fuera de todos los botones, devuelve -1
+    return -1;
 }
-// Fin de la funcion get_button_clicked. Su proposito es devolver que boton interactivo fue presionado.
 
-void show_sequence(GameplayState state, ALLEGRO_FONT* font) {
-    // Pausa antes de empezar a mostrar la secuencia
+void show_sequence(GameplayState state, ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image) {
     al_rest(0.5);
-    // Itera a traves de la secuencia y llama a la funcion de destello para cada elemento
     for (int i = 0; i < sequence_len; i++) {
-        flash_sequence_color(sequence[i], state, font);
+        flash_sequence_color(sequence[i], state, font, bg_image);
     }
 }
-// Fin de la funcion show_sequence. Su proposito es iterar y mostrar la secuencia completa.
 
 void add_to_sequence() {
-    // Solo anade si no hemos alcanzado el tamano maximo
     if (sequence_len < MAX_SEQUENCE) {
-        // Anade un numero aleatorio entre 0 y 8 al final del array de secuencia
         sequence[sequence_len] = rand() % NUM_BOTONES;
-        // Incrementa la longitud de la secuencia
         sequence_len++;
     }
 }
-// Fin de la funcion add_to_sequence. Su proposito es anade un nuevo paso aleatorio a la secuencia.
 
-void init_buttons(ALLEGRO_SAMPLE* sounds[]) {
-    // Define los 9 colores vivos para cada boton
+void init_buttons(ALLEGRO_SAMPLE_INSTANCE* instances[]) {
     ALLEGRO_COLOR colors[] = {
         al_map_rgb(255, 0, 0), al_map_rgb(0, 255, 0), al_map_rgb(0, 0, 255),
         al_map_rgb(255, 255, 0), al_map_rgb(255, 0, 255), al_map_rgb(0, 255, 255),
         al_map_rgb(255, 128, 0), al_map_rgb(128, 0, 255), al_map_rgb(255, 255, 255)
     };
-    
-    // Calcula la posicion inicial para centrar las cuadriculas dentro de sus respectivos paneles
     float display_start_x = PANEL_MARGIN_X + (PANEL_WIDTH - 3 * BUTTON_SIZE - 2 * BUTTON_SPACING) / 2.0;
     float interactive_start_x = (PANEL_MARGIN_X + PANEL_WIDTH + PANEL_SPACING) + (PANEL_WIDTH - 3 * BUTTON_SIZE - 2 * BUTTON_SPACING) / 2.0;
     float start_y = PANEL_MARGIN_Y + (PANEL_HEIGHT - 3 * BUTTON_SIZE - 2 * BUTTON_SPACING) / 2.0;
-
-    // Itera sobre los 9 botones para asignarles sus propiedades
     for (int i = 0; i < NUM_BOTONES; i++) {
-        // Calcula la fila y columna actual (0, 1 o 2)
         int row = i / 3;
         int col = i % 3;
-
-        // Asigna las coordenadas para el panel de display (izquierda)
         buttons[i].dx = display_start_x + col * (BUTTON_SIZE + BUTTON_SPACING);
         buttons[i].dy = start_y + row * (BUTTON_SIZE + BUTTON_SPACING);
-        // Asigna las coordenadas para el panel interactivo (derecha)
         buttons[i].ix = interactive_start_x + col * (BUTTON_SIZE + BUTTON_SPACING);
         buttons[i].iy = start_y + row * (BUTTON_SIZE + BUTTON_SPACING);
-        
-        // Asigna el color vivo
         buttons[i].color = colors[i];
-        
-        // Genera el color "apagado" (dim) a partir del color vivo
         unsigned char r, g, b;
         al_unmap_rgb(colors[i], &r, &g, &b);
         buttons[i].dim_color = al_map_rgb(r / 4, g / 4, b / 4);
-
-        // Asigna un sonido, ciclando a traves de los 4 sonidos disponibles
-        buttons[i].sound = sounds[i % 4] ? sounds[i % 4] : NULL;
+        buttons[i].sound_instance = instances[i];
     }
 }
-// Fin de la funcion init_buttons. Su proposito es establecer los valores iniciales de los 9 botones.
 
-void game_over_screen(ALLEGRO_FONT* font) {
-    // Calcula la puntuacion final
-    int final_score = (sequence_len > 0) ? sequence_len - 1 : 0;
-    // Limpia la pantalla
-    al_clear_to_color(al_map_rgb(5, 5, 25));
-    // Dibuja el mensaje de "Game Over" y la puntuacion
-    al_draw_textf(font, al_map_rgb(255, 0, 0), ANCHO / 2, (ALTO / 2) - 50, ALLEGRO_ALIGN_CENTER, "SECUENCIA INCORRECTA");
-    al_draw_textf(font, al_map_rgb(255, 255, 255), ANCHO / 2, (ALTO / 2), ALLEGRO_ALIGN_CENTER, "Puntuacion final: %d", final_score);
-    // Muestra los cambios en pantalla
-    al_flip_display();
-    // Pausa por 3 segundos para que el jugador pueda leer el mensaje
-    al_rest(3.0);
+
+// Funcion que lee todos los jugadores del archivo binario y los devuelve en un array
+int leer_jugadores(Jugador jugadores[]) {
+    FILE* f = fopen(ARCHIVO_GUARDADO, "rb");
+    if (!f) {
+        return 0; // Si el archivo no existe, no hay jugadores que leer
+    }
+    int count = 0;
+    // Lee jugador por jugador hasta que se acabe el archivo
+    while (count < MAX_JUGADORES && fread(&jugadores[count], sizeof(Jugador), 1, f) == 1) {
+        count++;
+    }
+    fclose(f);
+    return count;
 }
-// Fin de la funcion game_over_screen. Su proposito es mostrar el mensaje de que el jugador perdio.
 
-MenuAction run_game_loop(ALLEGRO_FONT* font) {
-    // Crea y configura un temporizador para refrescar la pantalla 60 veces por segundo (60 FPS)
+// Funcion que escribe un array completo de jugadores al archivo, sobreescribiendolo
+void escribir_jugadores(Jugador jugadores[], int count) {
+    FILE* f = fopen(ARCHIVO_GUARDADO, "wb");
+    if (!f) {
+        fprintf(stderr, "Error al abrir el archivo para escribir.\n");
+        return;
+    }
+    fwrite(jugadores, sizeof(Jugador), count, f);
+    fclose(f);
+}
+
+// Funcion principal para guardar. Lee, modifica y reescribe el archivo.
+void guardar_partida(const char* nombre_jugador, int final_score, bool en_progreso) {
+    Jugador jugadores[MAX_JUGADORES];
+    int num_jugadores = leer_jugadores(jugadores);
+
+    int indice_jugador = -1;
+    // Busca si el jugador ya existe
+    for (int i = 0; i < num_jugadores; i++) {
+        if (strcmp(jugadores[i].nombre, nombre_jugador) == 0) {
+            indice_jugador = i;
+            break;
+        }
+    }
+
+    if (indice_jugador != -1) { // El jugador existe, hay que actualizarlo
+        jugadores[indice_jugador].en_progreso = en_progreso;
+        if (en_progreso) {
+            jugadores[indice_jugador].sequence_len_guardado = sequence_len;
+            memcpy(jugadores[indice_jugador].sequence_guardada, sequence, sizeof(int) * sequence_len);
+        }
+        if (final_score > jugadores[indice_jugador].max_score) {
+            jugadores[indice_jugador].max_score = final_score;
+        }
+    }
+    else { // Jugador nuevo, hay que añadirlo
+        if (num_jugadores < MAX_JUGADORES) {
+            strcpy(jugadores[num_jugadores].nombre, nombre_jugador);
+            jugadores[num_jugadores].max_score = final_score;
+            jugadores[num_jugadores].en_progreso = en_progreso;
+            if (en_progreso) {
+                jugadores[num_jugadores].sequence_len_guardado = sequence_len;
+                memcpy(jugadores[num_jugadores].sequence_guardada, sequence, sizeof(int) * sequence_len);
+            }
+            num_jugadores++;
+        }
+    }
+    escribir_jugadores(jugadores, num_jugadores);
+}
+
+// Funcion de comparacion para qsort. Ordena de mayor a menor.
+int comparar_puntuaciones(const void* a, const void* b) {
+    Jugador* jugadorA = (Jugador*)a;
+    Jugador* jugadorB = (Jugador*)b;
+    return (jugadorB->max_score - jugadorA->max_score);
+}
+
+// Muestra la pantalla de Rankings
+MenuAction show_rankings_screen(ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_image) {
+    Jugador jugadores[MAX_JUGADORES];
+    int num_jugadores = leer_jugadores(jugadores);
+
+    // Ordena el array de jugadores usando qsort
+    qsort(jugadores, num_jugadores, sizeof(Jugador), comparar_puntuaciones);
+
+    bool salir = false;
+    while (!salir) {
+        ALLEGRO_EVENT ev;
+        al_wait_for_event(event_queue, &ev);
+        if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE || ev.type == ALLEGRO_EVENT_KEY_DOWN || ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN) {
+            salir = true;
+        }
+
+        if (bg_image) {
+            al_draw_scaled_bitmap(bg_image, 0, 0, al_get_bitmap_width(bg_image), al_get_bitmap_height(bg_image), 0, 0, ANCHO, ALTO, 0);
+        }
+        else {
+            al_clear_to_color(al_map_rgb(10, 10, 30)); // Color de respaldo
+        }
+        al_draw_text(font, al_map_rgb(255, 255, 0), ANCHO / 2, 30, ALLEGRO_ALIGN_CENTER, "RANKING");
+
+        for (int i = 0; i < num_jugadores && i < 10; i++) { // Muestra hasta los 10 mejores
+            al_draw_textf(font, al_map_rgb(255, 255, 255), ANCHO / 2 - 150, 100 + i * 40, ALLEGRO_ALIGN_LEFT, "%d. %s", i + 1, jugadores[i].nombre);
+            al_draw_textf(font, al_map_rgb(255, 255, 255), ANCHO / 2 + 150, 100 + i * 40, ALLEGRO_ALIGN_RIGHT, "%d", jugadores[i].max_score);
+        }
+        al_draw_text(font, al_map_rgb(200, 200, 200), ANCHO / 2, ALTO - 50, ALLEGRO_ALIGN_CENTER, "Presiona cualquier tecla para volver");
+        al_flip_display();
+    }
+    return ACTION_BACK;
+}
+
+// Muestra la pantalla para ingresar nombre
+MenuAction show_name_input_screen(ALLEGRO_FONT* font, char* name_buffer, int max_len) {
+    strcpy(name_buffer, "");
+    int pos = 0;
+    bool salir = false;
+    while (!salir) {
+        ALLEGRO_EVENT ev;
+        al_wait_for_event(event_queue, &ev);
+        if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) return ACTION_BACK;
+        if (ev.type == ALLEGRO_EVENT_KEY_DOWN) {
+            if (ev.keyboard.keycode == ALLEGRO_KEY_ENTER) {
+                if (pos > 0) return ACTION_NAME_ENTERED;
+            }
+            else if (ev.keyboard.keycode == ALLEGRO_KEY_BACKSPACE) {
+                if (pos > 0) {
+                    pos--;
+                    name_buffer[pos] = '\0';
+                }
+            }
+        }
+        else if (ev.type == ALLEGRO_EVENT_KEY_CHAR) {
+            if (ev.keyboard.unichar >= 32 && ev.keyboard.unichar <= 126) { // Caracteres imprimibles
+                if (pos < max_len - 1) {
+                    name_buffer[pos++] = ev.keyboard.unichar;
+                    name_buffer[pos] = '\0';
+                }
+            }
+        }
+
+        al_clear_to_color(al_map_rgb(10, 10, 30));
+        al_draw_text(font, al_map_rgb(255, 255, 255), ANCHO / 2, ALTO / 2 - 100, ALLEGRO_ALIGN_CENTER, "Ingresa tu nombre:");
+        al_draw_text(font, al_map_rgb(255, 255, 0), ANCHO / 2, ALTO / 2, ALLEGRO_ALIGN_CENTER, name_buffer);
+        al_draw_line(ANCHO / 2 - 200, ALTO / 2 + 60, ANCHO / 2 + 200, ALTO / 2 + 60, al_map_rgb(255, 255, 255), 2);
+        al_draw_text(al_create_builtin_font(), al_map_rgb(200, 200, 200), ANCHO / 2, ALTO - 50, ALLEGRO_ALIGN_CENTER, "Presiona ENTER para continuar");
+        al_flip_display();
+    }
+    return ACTION_BACK;
+}
+
+// Muestra la pantalla para cargar partida
+MenuAction show_load_game_screen(ALLEGRO_FONT* font) {
+    Jugador todos_los_jugadores[MAX_JUGADORES];
+    int num_total_jugadores = leer_jugadores(todos_los_jugadores);
+
+    Jugador partidas_en_progreso[MAX_JUGADORES];
+    int num_partidas_progreso = 0;
+    for (int i = 0; i < num_total_jugadores; i++) {
+        if (todos_los_jugadores[i].en_progreso) {
+            partidas_en_progreso[num_partidas_progreso++] = todos_los_jugadores[i];
+        }
+    }
+
+    bool salir = false;
+    while (!salir) {
+        ALLEGRO_EVENT ev;
+        al_wait_for_event(event_queue, &ev);
+        if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE || (ev.type == ALLEGRO_EVENT_KEY_DOWN && ev.keyboard.keycode == ALLEGRO_KEY_ESCAPE)) {
+            return ACTION_BACK;
+        }
+        if (ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN) {
+            for (int i = 0; i < num_partidas_progreso; i++) {
+                if (ev.mouse.y > 100 + i * 40 && ev.mouse.y < 130 + i * 40) {
+                    // Cargar los datos de esta partida en las variables globales
+                    strcpy(nombre_jugador_actual, partidas_en_progreso[i].nombre);
+                    sequence_len = partidas_en_progreso[i].sequence_len_guardado;
+                    memcpy(sequence, partidas_en_progreso[i].sequence_guardada, sizeof(int) * sequence_len);
+                    return ACTION_PLAY; // Devolvemos una accion para que el main sepa que empezar
+                }
+            }
+        }
+
+        al_clear_to_color(al_map_rgb(10, 10, 30));
+        al_draw_text(font, al_map_rgb(255, 255, 0), ANCHO / 2, 30, ALLEGRO_ALIGN_CENTER, "CARGAR PARTIDA");
+        if (num_partidas_progreso == 0) {
+            al_draw_text(font, al_map_rgb(255, 255, 255), ANCHO / 2, ALTO / 2, ALLEGRO_ALIGN_CENTER, "No hay partidas en progreso.");
+        }
+        else {
+            for (int i = 0; i < num_partidas_progreso; i++) {
+                al_draw_textf(font, al_map_rgb(255, 255, 255), ANCHO / 2, 100 + i * 40, ALLEGRO_ALIGN_CENTER, "%s - Score: %d", partidas_en_progreso[i].nombre, partidas_en_progreso[i].sequence_len_guardado - 1);
+            }
+        }
+        al_draw_text(font, al_map_rgb(200, 200, 200), ANCHO / 2, ALTO - 50, ALLEGRO_ALIGN_CENTER, "Presiona ESC para volver");
+        al_flip_display();
+    }
+    return ACTION_BACK;
+}
+void game_over_screen(ALLEGRO_FONT* font, ALLEGRO_BITMAP* bg_explosion) {
+    if (sonido_game_over) {
+        al_play_sample(sonido_game_over, 1.0, 0.0, 1.0, ALLEGRO_PLAYMODE_ONCE, NULL);
+    }
+    int final_score = (sequence_len > 0) ? sequence_len - 1 : 0;
+    if (bg_explosion) {
+        al_draw_scaled_bitmap(bg_explosion, 0, 0, al_get_bitmap_width(bg_explosion), al_get_bitmap_height(bg_explosion), 0, 0, ANCHO, ALTO, 0);
+    }
+    else {
+        al_clear_to_color(al_map_rgb(5, 5, 25)); // Color de respaldo
+    }
+  
+    al_draw_textf(font, al_map_rgb(255, 0, 0), ANCHO / 2, (ALTO / 2) - 150, ALLEGRO_ALIGN_CENTER, "GAME OVER");
+    al_draw_textf(font, al_map_rgb(255, 255, 255), ANCHO / 2, (ALTO / 2) - 100, ALLEGRO_ALIGN_CENTER, "Puntuacion final: %d", final_score);
+    al_flip_display();
+    al_rest(3.0);
+    ALLEGRO_EVENT ev;
+    while (true) {
+        al_wait_for_event(event_queue, &ev);
+        if (ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN || ev.type == ALLEGRO_EVENT_KEY_DOWN || ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
+            break;
+        }
+    }
+}
+
+// Bucle de juego modificado para guardar
+MenuAction run_game_loop(ALLEGRO_FONT* font, bool cargado, ALLEGRO_BITMAP* bg_image, ALLEGRO_BITMAP* bg_explosion) {
     ALLEGRO_TIMER* game_timer = al_create_timer(1.0 / 60.0);
     al_register_event_source(event_queue, al_get_timer_event_source(game_timer));
     al_start_timer(game_timer);
 
-    // Variables locales para controlar la partida
-    bool in_game = true; // Controla si el bucle de la partida debe seguir ejecutandose
-    GameplayState current_game_state = GAME_IDLE; // El estado interno de la partida, empieza en espera
-    int player_index = 0; // Lleva la cuenta de que tan lejos ha llegado el jugador en la secuencia actual
-    sequence_len = 0; // Reinicia la longitud de la secuencia para cada nueva partida
+    bool in_game = true;
+    GameplayState current_game_state;
+    int player_index = 0;
 
-    // Bucle principal de la partida
+    if (cargado) {
+        current_game_state = GAME_SHOWING_SEQUENCE;
+    }
+    else {
+        sequence_len = 0;
+        current_game_state = GAME_IDLE;
+    }
+
     while (in_game) {
-        // Espera a que ocurra un evento (clic, tecla, cierre de ventana, timer)
         ALLEGRO_EVENT ev;
         al_wait_for_event(event_queue, &ev);
 
-        // --- MANEJO DE EVENTOS ---
-        // Si el usuario cierra la ventana
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
+            guardar_partida(nombre_jugador_actual, (sequence_len > 0) ? sequence_len - 1 : 0, true);
             in_game = false;
             al_destroy_timer(game_timer);
             return ACTION_QUIT;
         }
 
-        // Si el usuario hace clic con el mouse
         if (ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN) {
-            // Comprueba si se hizo clic en el boton de Salir
             if (ev.mouse.x >= ANCHO - 40 && ev.mouse.x <= ANCHO - 10 && ev.mouse.y >= 10 && ev.mouse.y <= 40) {
-                in_game = false; // Termina el bucle de la partida
-                break; // Sale del switch de eventos
+                guardar_partida(nombre_jugador_actual, (sequence_len > 0) ? sequence_len - 1 : 0, true);
+                in_game = false;
+                break;
             }
-
-            // Logica del clic segun el estado actual de la partida
             if (current_game_state == GAME_IDLE) {
-                // Si estamos esperando, comprueba si el clic fue en el boton "Iniciar"
-                if (ev.mouse.x >= ANCHO/2 - 100 && ev.mouse.x <= ANCHO/2 + 100 && ev.mouse.y >= ALTO/2 - 40 && ev.mouse.y <= ALTO/2 + 40) {
-                    current_game_state = GAME_SHOWING_SEQUENCE; // Si es asi, cambia de estado para empezar
+                if (ev.mouse.x >= ANCHO / 2 - 100 && ev.mouse.x <= ANCHO / 2 + 100 && ev.mouse.y >= ALTO / 2 - 40 && ev.mouse.y <= ALTO / 2 + 40) {
+                    current_game_state = GAME_SHOWING_SEQUENCE;
                 }
             }
             else if (current_game_state == GAME_PLAYER_TURN) {
-                // Si es el turno del jugador, comprueba en que boton se hizo clic
                 int index = get_button_clicked(ev.mouse.x, ev.mouse.y);
-                if (index != -1) { // Si se hizo clic en un boton valido...
-                    flash_player_press(index, current_game_state, font); // Muestra el feedback visual
-
-                    if (index == sequence[player_index]) { // ACIERTO: el boton es el correcto
-                        player_index++; // Avanza al siguiente elemento de la secuencia a comprobar
-                        if (player_index == sequence_len) { // SECUENCIA COMPLETADA: el jugador acerto todo
-                           current_game_state = GAME_SHOWING_SEQUENCE; // Cambia de estado para mostrar la siguiente secuencia mas larga
+                if (index != -1) {
+                    flash_player_press(index, current_game_state, font, bg_image);
+                    if (index == sequence[player_index]) {
+                        player_index++;
+                        if (player_index == sequence_len) {
+                            current_game_state = GAME_SHOWING_SEQUENCE;
                         }
-                    } else { // FALLO: el boton es incorrecto
-                        current_game_state = GAME_OVER; // Cambia de estado a partida terminada
+                    }
+                    else {
+                        current_game_state = GAME_OVER;
                     }
                 }
             }
         }
-        
-        // --- LOGICA DE ESTADOS DEL JUEGO (se ejecuta fuera del manejo de eventos) ---
-        if(current_game_state == GAME_SHOWING_SEQUENCE){
-            player_index = 0; // Reinicia el progreso del jugador para la nueva ronda
-            add_to_sequence(); // Anade un nuevo color a la secuencia
-            show_sequence(current_game_state, font); // Muestra la nueva secuencia
-            current_game_state = GAME_PLAYER_TURN; // Despues de mostrar, es el turno del jugador
-        }
-        
-        if(current_game_state == GAME_OVER){
-            game_over_screen(font); // Muestra la pantalla de fin de partida
-            in_game = false; // Termina el bucle de la partida
+
+        if (current_game_state == GAME_SHOWING_SEQUENCE) {
+            player_index = 0;
+            if (!cargado) {
+                add_to_sequence();
+            }
+            cargado = false;
+            show_sequence(current_game_state, font, bg_image);
+            current_game_state = GAME_PLAYER_TURN;
         }
 
-        // --- DIBUJADO (se ejecuta cada vez que el timer lo indica, 60 veces por segundo) ---
+        if (current_game_state == GAME_OVER) {
+            guardar_partida(nombre_jugador_actual, (sequence_len > 0) ? sequence_len - 1 : 0, false);
+            reproducir_musica_derrota();
+            game_over_screen(font, bg_explosion);
+            in_game = false;
+        }
+
         if (ev.type == ALLEGRO_EVENT_TIMER) {
-            draw_game_ui(current_game_state, font); // Dibuja toda la interfaz
-            al_flip_display(); // Muestra en pantalla lo que se ha dibujado
+            draw_game_ui(current_game_state, font,bg_image);
+            al_flip_display();
         }
     }
 
-    al_destroy_timer(game_timer); // Libera la memoria del temporizador
-    return ACTION_BACK; // Devuelve la accion de "atras" para volver al menu principal
+    al_destroy_timer(game_timer);
+    return ACTION_BACK;
 }
-// Fin de la funcion run_game_loop. Es el corazon del juego, manejando la logica de la partida.
+
 
 MenuAction mostrar_menu_principal(ALLEGRO_BITMAP* bg_image, ALLEGRO_FONT* title_font, ALLEGRO_FONT* button_font) {
     ALLEGRO_TIMER* menu_timer = al_create_timer(1.0 / 30.0);
     al_register_event_source(event_queue, al_get_timer_event_source(menu_timer));
     al_start_timer(menu_timer);
 
-    float button_x = ANCHO / 2, button_y = ALTO / 2 + 10, button_w = 150, button_h = 50;
+    // Coordenadas de los botones
+    float play_x = ANCHO / 2, play_y = ALTO / 2 - 30;
+    float rank_x = ANCHO / 2, rank_y = ALTO / 2 + 40;
+    float exit_x = ANCHO / 2, exit_y = ALTO / 2 + 110;
+    float btn_w = 200, btn_h = 50;
 
     while (true) {
         ALLEGRO_EVENT ev;
         al_wait_for_event(event_queue, &ev);
 
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
+            detener_musica();
             al_destroy_timer(menu_timer);
             return ACTION_QUIT;
         }
         if (ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN) {
-            if (ev.mouse.x >= button_x - button_w / 2 && ev.mouse.x <= button_x + button_w / 2 &&
-                ev.mouse.y >= button_y - button_h / 2 && ev.mouse.y <= button_y + button_h / 2) {
+            // Chequear clic en boton PLAY
+            if (ev.mouse.x >= play_x - btn_w / 2 && ev.mouse.x <= play_x + btn_w / 2 && ev.mouse.y >= play_y - btn_h / 2 && ev.mouse.y <= play_y + btn_h / 2) {
                 al_destroy_timer(menu_timer);
                 return ACTION_PLAY;
+            }
+            // Chequear clic en boton RANKINGS
+            if (ev.mouse.x >= rank_x - btn_w / 2 && ev.mouse.x <= rank_x + btn_w / 2 && ev.mouse.y >= rank_y - btn_h / 2 && ev.mouse.y <= rank_y + btn_h / 2) {
+                al_destroy_timer(menu_timer);
+                return ACTION_RANKINGS;
+            }
+            //Checa clic en boton salir
+            if (ev.mouse.x >= exit_x - btn_w / 2 && ev.mouse.x <= exit_x + btn_w / 2 &&
+                ev.mouse.y >= exit_y - btn_h / 2 && ev.mouse.y <= exit_y + btn_h / 2) {
+                detener_musica(); // Detenemos la musica antes de salir
+                al_destroy_timer(menu_timer);
+                return ACTION_QUIT; // Esta accion le dice a main() que cierre el programa
             }
         }
         if (ev.type == ALLEGRO_EVENT_TIMER) {
             if (bg_image) {
                 al_draw_scaled_bitmap(bg_image, 0, 0, al_get_bitmap_width(bg_image), al_get_bitmap_height(bg_image), 0, 0, ANCHO, ALTO, 0);
-            } else {
+            }
+            else {
                 al_clear_to_color(al_map_rgb(20, 20, 20));
             }
-
             al_draw_text(title_font, al_map_rgb(255, 255, 255), ANCHO / 2, ALTO / 2 - 200, ALLEGRO_ALIGN_CENTER, "REACTOR");
-            al_draw_filled_rectangle(button_x - button_w / 2, button_y - button_h / 2, button_x + button_w / 2, button_y + button_h / 2, al_map_rgb(0, 150, 0));
-            al_draw_text(button_font, al_map_rgb(255, 255, 255), button_x, button_y - 10, ALLEGRO_ALIGN_CENTER, "PLAY");
 
+            // Dibujar boton PLAY
+            al_draw_filled_rectangle(play_x - btn_w / 2, play_y - btn_h / 2, play_x + btn_w / 2, play_y + btn_h / 2, al_map_rgb(0, 150, 0));
+            al_draw_text(button_font, al_map_rgb(255, 255, 255), play_x, play_y - 12, ALLEGRO_ALIGN_CENTER, "JUGAR");
+
+            // Dibujar boton RANKINGS
+            al_draw_filled_rectangle(rank_x - btn_w / 2, rank_y - btn_h / 2, rank_x + btn_w / 2, rank_y + btn_h / 2, al_map_rgb(0, 0, 150));
+            al_draw_text(button_font, al_map_rgb(255, 255, 255), rank_x, rank_y - 12, ALLEGRO_ALIGN_CENTER, "RANKINGS");
+            //Dibujar boton salir
+            al_draw_filled_rectangle(exit_x - btn_w / 2, exit_y - btn_h / 2, exit_x + btn_w / 2, exit_y + btn_h / 2, al_map_rgb(200, 0, 0));
+            al_draw_text(button_font, al_map_rgb(255, 255, 255), exit_x, exit_y - 12, ALLEGRO_ALIGN_CENTER, "SALIR");
             al_flip_display();
         }
     }
 }
-// Fin de la funcion mostrar_menu_principal. Dibuja y gestiona el menu de inicio.
 
-MenuAction show_new_load_menu(ALLEGRO_FONT* button_font) {
+MenuAction show_new_load_menu(ALLEGRO_FONT* button_font, ALLEGRO_BITMAP* bg_image) {
     ALLEGRO_TIMER* menu_timer = al_create_timer(1.0 / 30.0);
     al_register_event_source(event_queue, al_get_timer_event_source(menu_timer));
     al_start_timer(menu_timer);
 
-    float new_game_x = ANCHO / 2, new_game_y = ALTO / 2 - 40, btn_w = 250, btn_h = 50;
-    float load_game_x = ANCHO / 2, load_game_y = ALTO / 2 + 40;
+    float new_game_x = ANCHO / 2, new_game_y = ALTO / 2 - 60;
+    float load_game_x = ANCHO / 2, load_game_y = ALTO / 2;
+    float back_x = ANCHO / 2, back_y = ALTO / 2 + 60;
+    float btn_w = 250, btn_h = 50;
 
     while (true) {
         ALLEGRO_EVENT ev;
@@ -536,42 +768,54 @@ MenuAction show_new_load_menu(ALLEGRO_FONT* button_font) {
                 al_destroy_timer(menu_timer);
                 return ACTION_LOAD_GAME;
             }
-        }
-        if (ev.type == ALLEGRO_EVENT_TIMER) {
-            al_clear_to_color(al_map_rgb(5, 5, 25));
-            al_draw_filled_rectangle(new_game_x - btn_w / 2, new_game_y - btn_h / 2, new_game_x + btn_w / 2, new_game_y + btn_h / 2, al_map_rgb(0, 100, 200));
-            al_draw_text(button_font, al_map_rgb(255, 255, 255), new_game_x, new_game_y - 10, ALLEGRO_ALIGN_CENTER, "New game");
-            al_draw_filled_rectangle(load_game_x - btn_w / 2, load_game_y - btn_h / 2, load_game_x + btn_w / 2, load_game_y + btn_h / 2, al_map_rgb(200, 100, 0));
-            al_draw_text(button_font, al_map_rgb(255, 255, 255), load_game_x, load_game_y - 10, ALLEGRO_ALIGN_CENTER, "Load game");
-            al_flip_display();
-        }
-    }
-}
-// Fin de la funcion show_new_load_menu. Dibuja y gestiona el menu para elegir nueva partida o cargar una.
-
-MenuAction show_load_game_screen(ALLEGRO_FONT* font) {
-    ALLEGRO_TIMER* menu_timer = al_create_timer(1.0 / 30.0);
-    al_register_event_source(event_queue, al_get_timer_event_source(menu_timer));
-    al_start_timer(menu_timer);
-
-    bool saved_games_found = false;
-
-    while (true) {
-        ALLEGRO_EVENT ev;
-        al_wait_for_event(event_queue, &ev);
-
-        if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE || ev.type == ALLEGRO_EVENT_KEY_DOWN || ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN) {
-            al_destroy_timer(menu_timer);
-            return ACTION_BACK;
-        }
-        if (ev.type == ALLEGRO_EVENT_TIMER) {
-            al_clear_to_color(al_map_rgb(5, 5, 25));
-            if (!saved_games_found) {
-                al_draw_text(font, al_map_rgb(255, 255, 0), ANCHO / 2, ALTO / 2 - 30, ALLEGRO_ALIGN_CENTER, "There are no saved games.");
-                al_draw_text(font, al_map_rgb(200, 200, 200), ANCHO / 2, ALTO / 2 + 50, ALLEGRO_ALIGN_CENTER, "(Press any key to go back)");
+            if (ev.mouse.x >= back_x - btn_w / 2 && ev.mouse.x <= back_x + btn_w / 2 && ev.mouse.y >= back_y - btn_h / 2 && ev.mouse.y <= back_y + btn_h / 2) {
+                al_destroy_timer(menu_timer);
+                return ACTION_BACK;
             }
+        }
+        if (ev.type == ALLEGRO_EVENT_TIMER) {
+            if (bg_image) {
+                al_draw_scaled_bitmap(bg_image, 0, 0, al_get_bitmap_width(bg_image), al_get_bitmap_height(bg_image), 0, 0, ANCHO, ALTO, 0);
+            }
+            else {
+                al_clear_to_color(al_map_rgb(5, 5, 25)); // Color de respaldo si no se carga la imagen
+            }
+            al_draw_filled_rectangle(new_game_x - btn_w / 2, new_game_y - btn_h / 2, new_game_x + btn_w / 2, new_game_y + btn_h / 2, al_map_rgb(0, 100, 200));
+            al_draw_text(button_font, al_map_rgb(255, 255, 255), new_game_x, new_game_y - 12, ALLEGRO_ALIGN_CENTER, "Nueva Partida");
+            al_draw_filled_rectangle(load_game_x - btn_w / 2, load_game_y - btn_h / 2, load_game_x + btn_w / 2, load_game_y + btn_h / 2, al_map_rgb(200, 100, 0));
+            al_draw_text(button_font, al_map_rgb(255, 255, 255), load_game_x, load_game_y - 12, ALLEGRO_ALIGN_CENTER, "Cargar Partida");
+            al_draw_filled_rectangle(back_x - btn_w / 2, back_y - btn_h / 2, back_x + btn_w / 2, back_y + btn_h / 2, al_map_rgb(100, 100, 100));
+            al_draw_text(button_font, al_map_rgb(255, 255, 255), back_x, back_y - 12, ALLEGRO_ALIGN_CENTER, "Atras");
             al_flip_display();
         }
     }
 }
-// Fin de la funcion show_load_game_screen. Muestra una pantalla indicando que no hay partidas guardadas.
+
+
+void reproducir_musica_menu() {
+    al_stop_sample_instance(instancia_juego);
+    al_stop_sample_instance(instancia_derrota);
+    al_play_sample_instance(instancia_menu);
+}
+
+void reproducir_musica_derrota() {
+    al_stop_sample_instance(instancia_juego);
+    al_play_sample_instance(instancia_derrota);
+}
+void reproducir_musica_juego() {
+    al_stop_sample_instance(instancia_menu);
+    al_play_sample_instance(instancia_juego);
+}
+
+void detener_musica() {
+    al_stop_sample_instance(instancia_menu);
+    al_stop_sample_instance(instancia_derrota);
+    al_stop_sample_instance(instancia_juego);
+
+}
+void sonido_laser() {
+    if (laser) {
+        al_play_sample(laser, 1.0, 0.0, 1.0, ALLEGRO_PLAYMODE_ONCE, NULL);
+    }
+
+}
